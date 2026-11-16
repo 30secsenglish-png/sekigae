@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="座席の配置・欠番・前方希望を指定してランダムに席替えできるWebアプリ">
+<title>席替えメーカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@600&family=Zen+Kaku+Gothic+New:wght@400;700&family=Zen+Maru+Gothic:wght@700&display=swap">
+<style>
+/* Layout: 左に設定（①座席 ②名簿 ③オプション）、右に黒板つきの結果。スマホでは縦一列 */
+:root{
+  --bg:#eef2ee; --surface:#ffffff; --ink:#1e2a23; --muted:#5d6c63; --line:#d3dcd5;
+  --board:#2e4a3b; --board-edge:#7a5a33; --chalk:#f3f0e4; --chalk-y:#ecd56a;
+  --desk:#e8c891; --desk-edge:#b48b52; --desk-ink:#3b2810; --front:#f6dfb0;
+  --off:#e3e8e4; --warn:#b3261e; --ok:#2e6b4a;
+  --f-board:"Klee One","Hiragino Maru Gothic ProN",sans-serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",sans-serif;
+  --f-num:"Zen Maru Gothic","Hiragino Maru Gothic ProN",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121815; --surface:#1b231f; --ink:#e4ebe6; --muted:#9aa89f; --line:#2f3b35;
+  --board:#22382c; --board-edge:#5e4526; --chalk:#ece8da; --chalk-y:#e3cb5e;
+  --desk:#6b5230; --desk-edge:#9a7744; --desk-ink:#fbecd0; --front:#7d5f33;
+  --off:#26302b; --warn:#ff8a80; --ok:#7fd1a4; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121815; --surface:#1b231f; --ink:#e4ebe6; --muted:#9aa89f; --line:#2f3b35;
+  --board:#22382c; --board-edge:#5e4526; --chalk:#ece8da; --chalk-y:#e3cb5e;
+  --desk:#6b5230; --desk-edge:#9a7744; --desk-ink:#fbecd0; --front:#7d5f33;
+  --off:#26302b; --warn:#ff8a80; --ok:#7fd1a4; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6}
+.wrap{max-width:1180px;margin:0 auto;padding-block:20px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-family:var(--f-board);font-size:28px;margin:0;text-wrap:balance}
+header p{margin:0;color:var(--muted);font-size:13px}
+.layout{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:880px){.layout{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:12px}
+.side{display:grid;gap:14px}
+h2{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}
+h2 .step{font-family:var(--f-num);background:var(--board);color:var(--chalk);width:24px;height:24px;border-radius:50%;display:inline-grid;place-items:center;font-size:13px}
+.hint{margin:0;color:var(--muted);font-size:12.5px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+label.f{display:grid;gap:4px;font-size:13px;font-weight:700}
+input[type=number],input[type=text],textarea{font:inherit;font-weight:400;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+input[type=number]{width:72px}
+textarea{min-height:96px;resize:vertical;font-size:13px}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:6px 12px;font-size:13px}
+button:hover{border-color:var(--muted)}
+:focus-visible{outline:2px solid var(--chalk-y);outline-offset:2px}
+.stepper{display:inline-flex;align-items:center;gap:4px;font-size:13px}
+.stepper button{width:30px;padding:4px 0}
+.stepper b{min-width:22px;text-align:center;font-variant-numeric:tabular-nums}
+/* editor */
+.editor{display:grid;gap:4px;user-select:none;touch-action:none}
+.editor button{aspect-ratio:1.25;padding:0;border-radius:5px;background:var(--off);border:1px dashed var(--line);font-family:var(--f-num);font-size:11px;color:transparent}
+.editor button[aria-pressed=true]{background:var(--desk);border:1px solid var(--desk-edge);color:var(--desk-ink)}
+.miniboard{background:var(--board);color:var(--chalk);font-family:var(--f-board);text-align:center;border-radius:4px;font-size:12px;padding:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent}
+.seg button[aria-pressed=true]{background:var(--board);color:var(--chalk)}
+/* result */
+.stage{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);display:grid;gap:12px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.go{background:var(--board);color:var(--chalk);border:0;font-size:17px;font-weight:700;padding:10px 26px;border-radius:8px;font-family:var(--f-body)}
+.go:hover{filter:brightness(1.12)}
+.status{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.status.warn{color:var(--warn)} .status.ok{color:var(--ok)}
+.room{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:18px;overflow-x:auto}
+.room.flip{flex-direction:column-reverse}
+.board{background:var(--board);color:var(--chalk);border:6px solid var(--board-edge);border-radius:4px;font-family:var(--f-board);text-align:center;font-size:20px;padding:10px;letter-spacing:.4em;position:relative;min-width:260px}
+.board small{position:absolute;right:12px;bottom:6px;font-size:12px;letter-spacing:0;color:var(--chalk-y)}
+.seats{display:grid;gap:10px;min-width:260px}
+.desk{aspect-ratio:1.35;border-radius:6px;background:var(--desk);border:1px solid var(--desk-edge);box-shadow:inset 0 -4px 0 rgba(0,0,0,.08);color:var(--desk-ink);display:grid;place-items:center;align-content:center;text-align:center;padding:4px;min-width:0}
+.desk .n{font-family:var(--f-num);font-size:clamp(18px,3.2vw,30px);line-height:1.1;font-variant-numeric:tabular-nums}
+.desk .nm{font-size:clamp(10px,1.3vw,13px);font-weight:700;line-height:1.2;overflow-wrap:anywhere}
+.desk.empty{background:transparent;border:1px dashed var(--desk-edge);box-shadow:none;color:var(--muted)}
+.desk.empty .n{font-size:13px;font-family:var(--f-body)}
+.desk.pref{background:var(--front)}
+.gap{visibility:hidden}
+.desk.rolling .n{opacity:.55}
+.room.big .desk .n{font-size:clamp(24px,4.5vw,46px)}
+.room.big .desk .nm{font-size:clamp(12px,1.8vw,18px)}
+.legend{font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px;background:var(--front);border:1px solid var(--desk-edge)}
+.toast{font-size:12.5px;color:var(--ok);min-height:1em}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>席替えメーカー</h1>
+    <p>座席を決めて、使う番号を指定して、ボタンを押すだけ。設定はこの端末に保存されます。</p>
+  </header>
+
+  <div class="layout">
+    <div class="side">
+      <section class="panel" aria-labelledby="h-seat">
+        <h2 id="h-seat"><span class="step">1</span>座席の配置</h2>
+        <div class="row">
+          <span class="stepper">列 <button id="colMinus" aria-label="列を減らす">−</button><b id="colVal">6</b><button id="colPlus" aria-label="列を増やす">＋</button></span>
+          <span class="stepper">行 <button id="rowMinus" aria-label="行を減らす">−</button><b id="rowVal">7</b><button id="rowPlus" aria-label="行を増やす">＋</button></span>
+        </div>
+        <div class="miniboard">黒板</div>
+        <div class="editor" id="editor"></div>
+        <div class="row">
+          <button id="allOn">全部の席を使う</button>
+          <button id="allOff">全部クリア</button>
+          <span class="hint" id="seatCount"></span>
+        </div>
+        <p class="hint">マスをタップ（なぞる）と、座席あり／なしが切り替わります。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-roster">
+        <h2 id="h-roster"><span class="step">2</span>使う番号</h2>
+        <div class="row">
+          <label class="f">最初<input type="number" id="numStart" min="1" max="99" value="1"></label>
+          <label class="f">最後<input type="number" id="numEnd" min="1" max="99" value="41"></label>
+        </div>
+        <label class="f">欠番（カンマ区切り）<input type="text" id="excluded" placeholder="例：13, 27" value="13"></label>
+        <label class="f">氏名（任意・1行に「番号 名前」）<textarea id="names" placeholder="1 青木 さくら&#10;2 石田 陽太"></textarea></label>
+      </section>
+
+      <section class="panel" aria-labelledby="h-opt">
+        <h2 id="h-opt"><span class="step">3</span>オプション</h2>
+        <label class="f">前の席にしたい番号（視力など）<input type="text" id="front" placeholder="例：5, 22"></label>
+        <div class="row" style="font-size:13px"><b>空席の位置</b>
+          <span class="seg" id="emptySeg"><button data-v="back" aria-pressed="true">後ろに寄せる</button><button data-v="random" aria-pressed="false">ランダム</button></span>
+        </div>
+        <div class="row" style="font-size:13px"><b>表示の向き</b>
+          <span class="seg" id="viewSeg"><button data-v="student" aria-pressed="true">生徒から</button><button data-v="teacher" aria-pressed="false">教卓から</button></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="stage">
+      <div class="actions">
+        <button class="go" id="shuffle">席替えする</button>
+        <button id="copy">結果をコピー</button>
+        <button id="bigBtn" aria-pressed="false">文字を大きく</button>
+        <span class="status" id="status"></span>
+      </div>
+      <div class="room" id="room">
+        <div class="board">黒　板<small id="dateLabel"></small></div>
+        <div class="seats" id="seats"></div>
+      </div>
+      <div class="legend"><span><i></i>前の席の指定あり</span><span id="note"></span></div>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const KEY="sekigae-maker-v1";
+const def={rows:7,cols:6,seats:null,start:1,end:41,excluded:"13",names:"",front:"",empty:"back",view:"student",big:false,result:null};
+let S=Object.assign({},def);
+try{const s=JSON.parse(localStorage.getItem(KEY)||"null"); if(s) S=Object.assign(S,s);}catch(e){}
+if(!Array.isArray(S.seats)) S.seats=allSeats(S.rows,S.cols);
+function allSeats(r,c){const a=[];for(let i=0;i<r;i++)for(let j=0;j<c;j++)a.push(i+"-"+j);return a;}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+const has=(r,c)=>S.seats.includes(r+"-"+c);
+function rnd(n){const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%n;}
+function shuffleArr(a){for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
+function parseNums(t){return [...new Set((t.match(/\d+/g)||[]).map(Number))];}
+function parseNames(){const m={};S.names.split(/\r?\n/).forEach(l=>{const x=l.trim().match(/^(\d+)[\s,、:：\t.]+(.+)$/);if(x)m[+x[1]]=x[2].trim();});return m;}
+function students(){const ex=new Set(parseNums(S.excluded));const a=[];const lo=Math.min(S.start,S.end),hi=Math.max(S.start,S.end);for(let i=lo;i<=hi;i++)if(!ex.has(i))a.push(i);return a;}
+function seatList(){const a=[];for(let r=0;r<S.rows;r++)for(let c=0;c<S.cols;c++)if(has(r,c))a.push({r,c,k:r+"-"+c});return a;}
+
+/* ---------- editor ---------- */
+let painting=null;
+function renderEditor(){
+  const ed=$("editor");ed.style.gridTemplateColumns=`repeat(${S.cols},minmax(0,1fr))`;ed.innerHTML="";
+  let n=0;
+  for(let r=0;r<S.rows;r++)for(let c=0;c<S.cols;c++){
+    const b=document.createElement("button");const on=has(r,c);if(on)n++;
+    b.setAttribute("aria-pressed",on);b.dataset.k=r+"-"+c;b.textContent=on?n:"";
+    b.setAttribute("aria-label",`${r+1}行${c+1}列`);ed.appendChild(b);
+  }
+  $("colVal").textContent=S.cols;$("rowVal").textContent=S.rows;
+  $("seatCount").textContent=`座席 ${S.seats.length}`;
+}
+function setSeat(k,on){const i=S.seats.indexOf(k);if(on&&i<0)S.seats.push(k);if(!on&&i>=0)S.seats.splice(i,1);}
+$("editor").addEventListener("pointerdown",e=>{const b=e.target.closest("button");if(!b)return;e.preventDefault();painting=b.getAttribute("aria-pressed")!=="true";setSeat(b.dataset.k,painting);S.result=null;changed();});
+$("editor").addEventListener("pointermove",e=>{if(painting===null)return;const el=document.elementFromPoint(e.clientX,e.clientY);const b=el&&el.closest&&el.closest("#editor button");if(b&&(b.getAttribute("aria-pressed")==="true")!==painting){setSeat(b.dataset.k,painting);changed();}});
+window.addEventListener("pointerup",()=>painting=null);
+$("editor").addEventListener("keydown",e=>{if((e.key===" "||e.key==="Enter")&&e.target.dataset.k){e.preventDefault();setSeat(e.target.dataset.k,!has(...e.target.dataset.k.split("-").map(Number)));S.result=null;changed();e.target.focus&&setTimeout(()=>{const nb=document.querySelector(`#editor [data-k="${e.target.dataset.k}"]`);nb&&nb.focus();});}});
+function resize(dr,dc){
+  S.rows=Math.max(1,Math.min(10,S.rows+dr));S.cols=Math.max(1,Math.min(10,S.cols+dc));
+  S.seats=S.seats.filter(k=>{const[r,c]=k.split("-").map(Number);return r<S.rows&&c<S.cols;});
+  if(dr>0)for(let c=0;c<S.cols;c++)setSeat((S.rows-1)+"-"+c,true);
+  if(dc>0)for(let r=0;r<S.rows;r++)setSeat(r+"-"+(S.cols-1),true);
+  S.result=null;changed();
+}
+$("rowPlus").onclick=()=>resize(1,0);$("rowMinus").onclick=()=>resize(-1,0);
+$("colPlus").onclick=()=>resize(0,1);$("colMinus").onclick=()=>resize(0,-1);
+$("allOn").onclick=()=>{S.seats=allSeats(S.rows,S.cols);S.result=null;changed();};
+$("allOff").onclick=()=>{S.seats=[];S.result=null;changed();};
+
+/* ---------- inputs ---------- */
+[["numStart","start",true],["numEnd","end",true],["excluded","excluded"],["names","names"],["front","front"]].forEach(([id,key,num])=>{
+  const el=$(id);el.value=S[key];
+  el.addEventListener("input",()=>{S[key]=num?(parseInt(el.value,10)||1):el.value;if(key!=="names")S.result=null;changed();});
+});
+function seg(id,key){const g=$(id);const upd=()=>g.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===S[key]));upd();
+  g.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;S[key]=b.dataset.v;upd();if(key==="empty")S.result=null;changed();});}
+seg("emptySeg","empty");seg("viewSeg","view");
+$("bigBtn").onclick=()=>{S.big=!S.big;changed();};
+
+/* ---------- assignment ---------- */
+function assign(){
+  const seats=seatList(),studs=students();
+  if(studs.length>seats.length)return null;
+  const front=parseNums(S.front).filter(n=>studs.includes(n));
+  const rest=shuffleArr(studs.filter(n=>!front.includes(n)));
+  const res={};let free=seats.slice();
+  // 前方希望：前の行から必要数を満たす範囲でランダム
+  if(front.length){
+    let pool=[];for(let r=0;r<S.rows&&pool.length<front.length;r++)pool=pool.concat(free.filter(s=>s.r===r));
+    shuffleArr(pool);shuffleArr(front).forEach((n,i)=>{res[pool[i].k]=n;});
+    const used=new Set(Object.keys(res));free=free.filter(s=>!used.has(s.k));
+  }
+  const nEmpty=free.length-rest.length;
+  let empties;
+  if(S.empty==="back"){empties=free.slice(free.length-nEmpty);}
+  else{empties=shuffleArr(free.slice()).slice(0,nEmpty);}
+  const eset=new Set(empties.map(s=>s.k));
+  free.filter(s=>!eset.has(s.k)).forEach((s,i)=>res[s.k]=rest[i]);
+  empties.forEach(s=>res[s.k]=0);
+  return res;
+}
+
+/* ---------- result ---------- */
+function renderSeats(res,rolling){
+  const box=$("seats"),names=parseNames(),front=new Set(parseNums(S.front));
+  const flip=S.view==="teacher";
+  box.style.gridTemplateColumns=`repeat(${S.cols},minmax(56px,1fr))`;box.innerHTML="";
+  for(let ri=0;ri<S.rows;ri++)for(let ci=0;ci<S.cols;ci++){
+    const r=flip?S.rows-1-ri:ri,c=flip?S.cols-1-ci:ci,k=r+"-"+c;
+    const d=document.createElement("div");
+    if(!has(r,c)){d.className="desk gap";box.appendChild(d);continue;}
+    const v=res?res[k]:undefined;d.className="desk";
+    if(v===0){d.classList.add("empty");d.innerHTML='<span class="n">空席</span>';}
+    else if(v){if(front.has(v)&&!rolling)d.classList.add("pref");if(rolling)d.classList.add("rolling");
+      d.innerHTML=`<span class="n">${v}</span>`+(names[v]&&!rolling?`<span class="nm"></span>`:"");
+      const nm=d.querySelector(".nm");if(nm)nm.textContent=names[v];}
+    else{d.innerHTML='<span class="n" style="opacity:.35">？</span>';}
+    box.appendChild(d);
+  }
+  $("room").classList.toggle("flip",flip);$("room").classList.toggle("big",!!S.big);
+  $("bigBtn").setAttribute("aria-pressed",!!S.big);
+}
+function status(){
+  const ns=S.seats.length,np=students().length,el=$("status");
+  if(np>ns){el.className="status warn";el.textContent=`座席が ${np-ns} 席足りません（座席 ${ns}／人数 ${np}）`;}
+  else{el.className="status ok";el.textContent=`座席 ${ns}／人数 ${np}`+(ns>np?`（空席 ${ns-np}）`:"");}
+  $("shuffle").disabled=np>ns||np===0;
+  const bad=parseNums(S.front).filter(n=>!students().includes(n));
+  $("note").textContent=bad.length?`前の席の指定のうち ${bad.join(", ")} 番は名簿にありません`:"";
+}
+function changed(){renderEditor();renderSeats(S.result,false);status();save();}
+
+let busy=false;
+$("shuffle").onclick=()=>{
+  if(busy)return;const res=assign();if(!res)return;
+  const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const d=new Date();$("dateLabel").textContent=`${d.getMonth()+1}月${d.getDate()}日`;
+  if(reduce){S.result=res;changed();return;}
+  busy=true;const studs=students();let t=0;
+  const iv=setInterval(()=>{
+    const fake={};seatList().forEach(s=>fake[s.k]=studs[rnd(studs.length)]);
+    renderSeats(fake,true);
+    if(++t>12){clearInterval(iv);S.result=res;busy=false;changed();}
+  },55);
+};
+$("copy").onclick=()=>{
+  const names=parseNames();if(!S.result){toast("先に「席替えする」を押してください");return;}
+  const lines=["（黒板）"];
+  for(let r=0;r<S.rows;r++){const cells=[];for(let c=0;c<S.cols;c++){const k=r+"-"+c;
+    if(!has(r,c))cells.push("");else{const v=S.result[k];cells.push(v===0?"空席":v+(names[v]?" "+names[v]:""));}}
+    lines.push(cells.join("\t"));}
+  const txt=lines.join("\n");
+  navigator.clipboard.writeText(txt).then(()=>toast("コピーしました。Excelやスプレッドシートに貼り付けられます"),()=>toast("コピーできませんでした。画面を長押しして選択してください"));
+};
+let tt;function toast(m){$("toast").textContent=m;clearTimeout(tt);tt=setTimeout(()=>$("toast").textContent="",3500);}
+
+if(!S.result){S.result=assign();}
+changed();
+})();
+</script>
+
+</body>
+</html>
